@@ -1,5 +1,7 @@
+// Improved by Aaron Wisner, without all the built in packet packing crap
+
 // **********************************************************************************
-// Driver definition for HopeRF RFM69W/RFM69HW/RFM69CW/RFM69HCW, Semtech SX1231/1231H
+// Driver definition for HopeRF RFM69W/RFM69HW/RFM69BaseCW/RFM69HCW, Semtech SX1231/1231H
 // **********************************************************************************
 // Copyright Felix Rusu 2016, http://www.LowPowerLab.com/contact
 // **********************************************************************************
@@ -23,14 +25,14 @@
 // Please maintain this license information along with authorship
 // and copyright notices in any redistribution of this code
 // **********************************************************************************
-#ifndef RFM69_h
-#define RFM69_h
+#ifndef RFM69Base_h
+#define RFM69Base_h
 #include <Arduino.h>            // assumes Arduino IDE v1.0 or greater
 
 #define RF69_MAX_DATA_LEN       61 // to take advantage of the built in AES/CRC we want to limit the frame size to the internal FIFO size (66 bytes - 3 bytes overhead - 2 bytes crc)
 #define RF69_SPI_CS             SS // SS is the SPI slave select pin, for instance D10 on ATmega328
 
-// INT0 on AVRs should be connected to RFM69's DIO0 (ex on ATmega328 it's D2, on ATmega644/1284 it's D2)
+// INT0 on AVRs should be connected to RFM69Base's DIO0 (ex on ATmega328 it's D2, on ATmega644/1284 it's D2)
 #if defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega88) || defined(__AVR_ATmega8__) || defined(__AVR_ATmega88__)
   #define RF69_IRQ_PIN          2
   #define RF69_IRQ_NUM          0
@@ -70,48 +72,36 @@
 #define RF69_FSTEP  61.03515625 // == FXOSC / 2^19 = 32MHz / 2^19 (p13 in datasheet)
 
 // TWS: define CTLbyte bits
-#define RFM69_CTL_SENDACK   0x80
-#define RFM69_CTL_REQACK    0x40
+#define RFM69Base_CTL_SENDACK   0x80
+#define RFM69Base_CTL_REQACK    0x40
 
-class RFM69 : RFM69Base {
-  public:
+#define PACKET_LEN_VARIABLE 256
+
+class RFM69Base
+{
+public:
+    // need to make public and static for isr
     static volatile uint8_t DATA[RF69_MAX_DATA_LEN]; // recv/xmit buf, including header & crc bytes
-    static volatile uint8_t DATALEN;
-    static volatile uint8_t SENDERID;
-    static volatile uint8_t TARGETID; // should match _address
     static volatile uint8_t PAYLOADLEN;
-    static volatile uint8_t ACK_REQUESTED;
-    static volatile uint8_t ACK_RECEIVED; // should be polled immediately after sending a packet with ACK request
     static volatile int16_t RSSI; // most accurate RSSI during reception (closest to the reception)
     static volatile uint8_t _mode; // should be protected?
 
-    RFM69(uint8_t slaveSelectPin=RF69_SPI_CS, uint8_t interruptPin=RF69_IRQ_PIN, bool isRFM69HW=false, uint8_t interruptNum=RF69_IRQ_NUM) {
-      _slaveSelectPin = slaveSelectPin;
-      _interruptPin = interruptPin;
-      _interruptNum = interruptNum;
-      _mode = RF69_MODE_STANDBY;
-      _promiscuousMode = false;
-      _powerLevel = 31;
-      _isRFM69HW = isRFM69HW;
-    }
+    RFM69Base(uint8_t slaveSelectPin=RF69_SPI_CS, uint8_t interruptPin=RF69_IRQ_PIN, bool isRFM69HW=false, uint8_t interruptNum=RF69_IRQ_NUM);
 
-    virtual bool initialize(uint8_t freqBand, uint8_t ID, uint8_t networkID=1) override;
-    void setAddress(uint8_t addr);
-    void setNetwork(uint8_t networkID);
+    virtual bool initialize(uint8_t freqBand);
     bool canSend();
-    virtual void send(uint8_t toAddress, const void* buffer, uint8_t bufferSize, bool requestACK=false);
-    virtual bool sendWithRetry(uint8_t toAddress, const void* buffer, uint8_t bufferSize, uint8_t retries=2, uint8_t retryWaitTime=40); // 40ms roundtrip req for 61byte packets
+    virtual void send(const void* buffer, uint8_t bufferSize);
     virtual bool receiveDone();
-    bool ACKReceived(uint8_t fromNodeID);
-    bool ACKRequested();
-    virtual void sendACK(const void* buffer = "", uint8_t bufferSize=0);
     uint32_t getFrequency();
+    void setPayloadLength(uint8_t len, bool variable);
     void setFrequency(uint32_t freqHz);
-    void encrypt(const char* key);
+    void setFrequency(uint8_t freq[3]); //manually set the registers
     void setCS(uint8_t newSPISlaveSelect);
+    void setSyncAddr(const uint8_t *addr, uint8_t len);
+    void setPacketSize(uint8_t len);
+    void standby(); //setMode(RF69_MODE_STANDBY);
     int16_t readRSSI(bool forceTrigger=false);
-    void promiscuous(bool onOff=true);
-    virtual void setHighPower(bool onOFF=true); // has to be called after initialize() for RFM69HW
+    virtual void setHighPower(bool onOFF=true); // has to be called after initialize() for RFM69BaseHW
     virtual void setPowerLevel(uint8_t level); // reduce/increase transmit power level
     void sleep();
     uint8_t readTemperature(uint8_t calFactor=0); // get CMOS temperature (8bit)
@@ -122,21 +112,20 @@ class RFM69 : RFM69Base {
     void writeReg(uint8_t addr, uint8_t val);
     void readAllRegs();
 
-  protected:
+protected:
+
     static void isr0();
     void virtual interruptHandler();
-    virtual void interruptHook(uint8_t CTLbyte) {};
+    virtual void recvCallback(uint8_t *data, uint8_t numBytes) {}; //interrupt callback
     static volatile bool _inISR;
-    virtual void sendFrame(uint8_t toAddress, const void* buffer, uint8_t size, bool requestACK=false, bool sendACK=false);
+    void encrypt(const char* key);
 
-    static RFM69* selfPointer;
+    static RFM69Base* selfPointer;
     uint8_t _slaveSelectPin;
     uint8_t _interruptPin;
     uint8_t _interruptNum;
-    uint8_t _address;
-    bool _promiscuousMode;
     uint8_t _powerLevel;
-    bool _isRFM69HW;
+    bool _isRFM69BaseHW;
 #if defined (SPCR) && defined (SPSR)
     uint8_t _SPCR;
     uint8_t _SPSR;
