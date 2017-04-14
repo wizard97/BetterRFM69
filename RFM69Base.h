@@ -1,5 +1,3 @@
-// Improved by Aaron Wisner, without all the built in packet packing crap
-
 // **********************************************************************************
 // Driver definition for HopeRF RFM69W/RFM69HW/RFM69BaseCW/RFM69HCW, Semtech SX1231/1231H
 // **********************************************************************************
@@ -125,7 +123,7 @@ protected:
     uint8_t _interruptPin;
     uint8_t _interruptNum;
     uint8_t _powerLevel;
-    bool _isRFM69BaseHW;
+    bool _isRFM69HW;
 #if defined (SPCR) && defined (SPSR)
     uint8_t _SPCR;
     uint8_t _SPSR;
